@@ -39,6 +39,7 @@ const string headers =
     "#include <math.h>\n"
     "#include <float.h>\n"
     "#include <assert.h>\n"
+    "#include <limits.h>\n"
     "#include <string.h>\n"
     "#include <stdio.h>\n"
     "#include <stdint.h>\n";
@@ -194,7 +195,6 @@ public:
     }
 };
 } // namespace
-
 )INLINE_CODE";
 }  // namespace
 
@@ -334,6 +334,8 @@ CodeGen_C::CodeGen_C(ostream &s, Target t, OutputKind output_kind, const std::st
             << globals
             << halide_internal_runtime_header_HalideRuntime_h << '\n'
             << halide_internal_initmod_inlined_c << '\n';
+        add_common_macros(stream);
+        stream << '\n';
     }
 
     // Throw in a default (empty) definition of HALIDE_FUNCTION_ATTRS
@@ -509,6 +511,24 @@ string type_to_c_type(Type type, bool include_space, bool c_plus_plus = true) {
 
 }  // namespace
 
+void CodeGen_C::add_common_macros(std::ostream &dest) {
+    const char *macros = R"INLINE_CODE(
+// ll suffix in OpenCL is reserver for 128-bit integers.
+#if defined __OPENCL_VERSION__
+#define ADD_INT64_T_SUFFIX(x) x##l
+#define ADD_UINT64_T_SUFFIX(x) x##ul
+// HLSL doesn't have any suffixes.
+#elif defined HLSL_VERSION
+#define ADD_INT64_T_SUFFIX(x) x
+#define ADD_UINT64_T_SUFFIX(x) x
+#else
+#define ADD_INT64_T_SUFFIX(x) x##ll
+#define ADD_UINT64_T_SUFFIX(x) x##ull
+#endif
+)INLINE_CODE";
+    dest << macros;
+}
+
 void CodeGen_C::add_vector_typedefs(const std::set<Type> &vector_types) {
     if (!vector_types.empty()) {
         // MSVC has a limit of ~16k for string literals, so split
@@ -673,14 +693,16 @@ public:
         }
         return r;
     }
-    friend Vec operator<<(const Vec &a, const Vec &b) {
+    template <typename OtherElementType>
+    friend Vec operator<<(const Vec &a, const CppVector<OtherElementType, Lanes> &b) {
         Vec r(empty);
         for (size_t i = 0; i < Lanes; i++) {
             r.elements[i] = a[i] << b[i];
         }
         return r;
     }
-    friend Vec operator>>(const Vec &a, const Vec &b) {
+    template <typename OtherElementType>
+    friend Vec operator>>(const Vec &a, const CppVector<OtherElementType, Lanes> &b) {
         Vec r(empty);
         for (size_t i = 0; i < Lanes; i++) {
             r.elements[i] = a[i] >> b[i];
@@ -1110,12 +1132,6 @@ public:
     friend Vec operator%(const Vec &a, const Vec &b) {
         return Vec(from_native_vector, a.native_vector % b.native_vector);
     }
-    friend Vec operator<<(const Vec &a, const Vec &b) {
-        return Vec(from_native_vector, a.native_vector << b.native_vector);
-    }
-    friend Vec operator>>(const Vec &a, const Vec &b) {
-        return Vec(from_native_vector, a.native_vector >> b.native_vector);
-    }
     friend Vec operator&(const Vec &a, const Vec &b) {
         return Vec(from_native_vector, a.native_vector & b.native_vector);
     }
@@ -1325,6 +1341,16 @@ public:
 private:
     template<typename, size_t> friend class NativeVector;
 
+    template <typename ElementType, typename OtherElementType, size_t Lanes>
+    friend NativeVector<ElementType, Lanes> operator<<(
+                    const NativeVector<ElementType, Lanes> &a,
+                    const NativeVector<OtherElementType, Lanes> &b);
+
+    template <typename ElementType, typename OtherElementType, size_t Lanes>
+    friend NativeVector<ElementType, Lanes> operator>>(
+                    const NativeVector<ElementType, Lanes> &a,
+                    const NativeVector<OtherElementType, Lanes> &b);
+
     NativeVectorType native_vector;
 
     // Leave vector uninitialized for cases where we overwrite every entry
@@ -1337,6 +1363,22 @@ private:
         native_vector = src;
     }
 };
+
+template <typename ElementType, typename OtherElementType, size_t Lanes>
+NativeVector<ElementType, Lanes> operator<<(const NativeVector<ElementType, Lanes> &a,
+                    const NativeVector<OtherElementType, Lanes> &b) {
+    return NativeVector<ElementType, Lanes>(
+                  NativeVector<ElementType, Lanes>::from_native_vector,
+                  a.native_vector << b.native_vector);
+}
+
+template <typename ElementType, typename OtherElementType, size_t Lanes>
+NativeVector<ElementType, Lanes> operator>>(const NativeVector<ElementType, Lanes> &a,
+                    const NativeVector<OtherElementType, Lanes> &b) {
+    return NativeVector<ElementType, Lanes>(
+                  NativeVector<ElementType, Lanes>::from_native_vector,
+                  a.native_vector >> b.native_vector);
+}
 #endif  // __has_attribute(ext_vector_type) || __has_attribute(vector_size)
 
 )INLINE_CODE";
@@ -1812,7 +1854,7 @@ void CodeGen_C::compile(const Buffer<> &buffer) {
 
     // Figure out the offset of the last pixel.
     size_t num_elems = 1;
-    for (int d = 0; b.dim[d].extent; d++) {
+    for (int d = 0; d < b.dimensions; d++) {
         num_elems += b.dim[d].stride * (b.dim[d].extent - 1);
     }
 
@@ -2042,12 +2084,12 @@ void CodeGen_C::visit(const IntImm *op) {
     if (op->type == Int(32)) {
         id = std::to_string(op->value);
     } else {
-        print_assignment(op->type, "(" + print_type(op->type) + ")(" + std::to_string(op->value) + ")");
+        print_assignment(op->type, "(" + print_type(op->type) + ")(ADD_INT64_T_SUFFIX(" + std::to_string(op->value) + "))");
     }
 }
 
 void CodeGen_C::visit(const UIntImm *op) {
-    print_assignment(op->type, "(" + print_type(op->type) + ")(" + std::to_string(op->value) + ")");
+    print_assignment(op->type, "(" + print_type(op->type) + ")(ADD_UINT64_T_SUFFIX(" + std::to_string(op->value) + "))");
 }
 
 void CodeGen_C::visit(const StringImm *op) {
@@ -2712,6 +2754,8 @@ void CodeGen_C::visit(const Allocate *op) {
     bool on_stack = false;
     int32_t constant_size;
     string size_id;
+    Type size_id_type;
+
     if (op->new_expr.defined()) {
         Allocation alloc;
         alloc.type = op->type;
@@ -2727,7 +2771,9 @@ void CodeGen_C::visit(const Allocate *op) {
                 user_error << "Total size for allocation "
                            << op->name << " is constant but exceeds 2^31 - 1.\n";
             } else {
-                size_id = print_expr(Expr(static_cast<int32_t>(constant_size)));
+                size_id_type = Int(32);
+                size_id = print_expr(make_const(size_id_type, constant_size));
+
                 if (op->memory_type == MemoryType::Stack ||
                     (op->memory_type == MemoryType::Auto &&
                      can_allocation_fit_on_stack(stack_bytes))) {
@@ -2740,6 +2786,7 @@ void CodeGen_C::visit(const Allocate *op) {
             internal_assert(op->extents.size() > 0);
 
             size_id = print_assignment(Int(64), print_expr(op->extents[0]));
+            size_id_type = Int(64);
 
             for (size_t i = 1; i < op->extents.size(); i++) {
                 // Make the code a little less cluttered for two-dimensional case
@@ -2772,8 +2819,8 @@ void CodeGen_C::visit(const Allocate *op) {
         // will be generated).
         if (!on_stack || is_zero(op->condition)) {
             Expr conditional_size = Select::make(op->condition,
-                                                 Var(size_id),
-                                                 Expr(static_cast<int32_t>(0)));
+                                                 Variable::make(size_id_type, size_id),
+                                                 make_const(size_id_type, 0));
             conditional_size = simplify(conditional_size);
             size_id = print_assignment(Int(64), print_expr(conditional_size));
         }
@@ -2920,17 +2967,20 @@ void CodeGen_C::test() {
     m.append(LoweredFunc("test1", args, s, LinkageType::External));
 
     ostringstream source;
+    ostringstream macros;
     {
         CodeGen_C cg(source, Target("host"), CodeGen_C::CImplementation);
         cg.compile(m);
+        cg.add_common_macros(macros);
     }
 
     string src = source.str();
     string correct_source =
         headers +
         globals +
-        string((const char *)halide_internal_runtime_header_HalideRuntime_h) + '\n' +
-        string((const char *)halide_internal_initmod_inlined_c) + R"GOLDEN_CODE(
+        string((const char *) halide_internal_runtime_header_HalideRuntime_h) + '\n' +
+        string((const char *) halide_internal_initmod_inlined_c) + '\n' +
+        macros.str() + R"GOLDEN_CODE(
 #ifndef HALIDE_FUNCTION_ATTRS
 #define HALIDE_FUNCTION_ATTRS
 #endif

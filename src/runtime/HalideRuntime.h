@@ -1255,6 +1255,7 @@ typedef enum halide_target_feature_t {
     halide_target_feature_trace_loads, ///< Trace all loads done by the pipeline. Equivalent to calling Func::trace_loads on every non-inlined Func.
     halide_target_feature_trace_stores, ///< Trace all stores done by the pipeline. Equivalent to calling Func::trace_stores on every non-inlined Func.
     halide_target_feature_trace_realizations, ///< Trace all realizations done by the pipeline. Equivalent to calling Func::trace_realizations on every non-inlined Func.
+    halide_target_feature_trace_pipeline, ///< Trace the pipeline.
     halide_target_feature_cuda_capability61,  ///< Enable CUDA compute capability 6.1 (Pascal)
     halide_target_feature_hvx_v65, ///< Enable Hexagon v65 architecture.
     halide_target_feature_hvx_v66, ///< Enable Hexagon v66 architecture.
@@ -1271,6 +1272,9 @@ typedef enum halide_target_feature_t {
     halide_target_feature_disable_llvm_loop_unroll,  ///< Disable loop unrolling in LLVM. (Ignored for non-LLVM targets.)
     halide_target_feature_wasm_simd128,  ///< Enable +simd128 instructions for WebAssembly codegen.
     halide_target_feature_wasm_signext,  ///< Enable +sign-ext instructions for WebAssembly codegen.
+    halide_target_feature_sve, ///< Enable ARM Scalable Vector Extensions
+    halide_target_feature_sve2, ///< Enable ARM Scalable Vector Extensions v2
+    halide_target_feature_egl,            ///< Force use of EGL support.
 
     halide_target_feature_end ///< A sentinel. Every target is considered to have this feature, and setting this feature does nothing.
 } halide_target_feature_t;
