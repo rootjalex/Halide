@@ -44,8 +44,8 @@ public:
             stride.set_estimate(2);
             extent.set_estimate(2);
 
-            output.dim(0).set_estimate(0, 1048); // w2 = (w1 - extent) / stride + 1
-            output.dim(1).set_estimate(0, 1048); // h2 = (h1 - extent) / stride + 1
+            output.dim(0).set_estimate(0, 1024); // w2 = (w1 - extent) / stride + 1
+            output.dim(1).set_estimate(0, 1024); // h2 = (h1 - extent) / stride + 1
             output.dim(2).set_estimate(0, 3);
             output.dim(3).set_estimate(0, 10);
         }
