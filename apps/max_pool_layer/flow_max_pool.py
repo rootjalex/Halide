@@ -25,7 +25,7 @@ if __name__ == "__main__":
 	images = tf.random.uniform((args.width, args.height, args.channels, args.nImages), dtype=tf.dtypes.float64)
 	timePassed = 0.0
 
-	with tf.Session() as sess:
+	with tf.compat.v1.Session() as sess:
 		sess.run(images)
 		for _ in range(args.iterations):
 			# print("X:", images)
@@ -37,4 +37,4 @@ if __name__ == "__main__":
 			# print("Y:", y)
 			timePassed += diff
 		
-	print("Average time for Tensorflow max_pool:", timePassed / args.iterations * 100, " ms")
+	print("Average time for Tensorflow max_pool:", timePassed / args.iterations * 100, "ms")

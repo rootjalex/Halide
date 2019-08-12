@@ -39,8 +39,8 @@ if __name__ == "__main__":
 
 	args = parser.parse_args()
 
-	profiler(pool_lambda(stride=args.stride, extent=args.extent, w=args.width, h=args.height, 
-		c=args.channels, n=args.nImages), args.iterations)
+	# profiler(pool_lambda(stride=args.stride, extent=args.extent, w=args.width, h=args.height, 
+	# 	c=args.channels, n=args.nImages), args.iterations)
 
 	images = torch.randn((args.width, args.height, args.channels, args.nImages))
 	timePassed = 0.0
@@ -50,5 +50,5 @@ if __name__ == "__main__":
 		y = func.max_pool2d(images, args.extent, args.stride)
 		diff = time.time() - start
 		timePassed += diff
-		
-	print("Average time for PyTorch max_pool:", timePassed / args.iterations)
+	
+	print("Average time for PyTorch max_pool:", timePassed / args.iterations * 100, "ms")

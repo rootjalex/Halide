@@ -152,13 +152,13 @@ int main(int argc, char **argv) {
     double min_t_manual = benchmark(iterations, iterations, [&]() {
         max_pool_layer(extent, stride, input, output);
     });
-    printf("Manually-tuned time: %gms\n", min_t_manual * 1e3);
+    printf("Average time for Halide max_pool manually-tuned: %g ms\n", min_t_manual * 1e3);
 
     // Auto-scheduled version
     double min_t_auto = benchmark(iterations, iterations, [&]() {
         max_pool_layer_auto_schedule(extent, stride, input, output);
     });
-    printf("Auto-scheduled time: %gms\n", min_t_auto * 1e3);
+    printf("Average time for Halide max_pool auto-scheduled: %g ms\n", min_t_auto * 1e3);
 
     return 0;
 }
