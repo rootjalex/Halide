@@ -25,11 +25,16 @@ if __name__ == "__main__":
 	images = tf.random.uniform((args.width, args.height, args.channels, args.nImages), dtype=tf.dtypes.float64)
 	timePassed = 0.0
 
-	for _ in range(args.iterations):
-		start = time.time()
-		y = tf.nn.max_pool2d(images, [args.extent, args.extent], 
-			args.stride, "SAME")
-		diff = time.time() - start
-		timePassed += diff
+	with tf.Session() as sess:
+		sess.run(images)
+		for _ in range(args.iterations):
+			# print("X:", images)
+			start = time.time()
+			y = tf.nn.max_pool2d(images, [args.extent, args.extent], 
+				args.stride, "SAME")
+			sess.run(y)
+			diff = time.time() - start
+			# print("Y:", y)
+			timePassed += diff
 		
-	print("Average time for Tensorflow max_pool:", timePassed / args.iterations)
+	print("Average time for Tensorflow max_pool:", timePassed / args.iterations * 100, " ms")
