@@ -1,11 +1,11 @@
 #!/bin/sh
 
-STRIDE="--stride 4"
-EXTENT="--extent 4"
-WIDTH="--width 1024"
-HEIGHT="--height 1024"
+STRIDE="--stride 2"
+EXTENT="--extent 2"
+WIDTH="--width 5048"
+HEIGHT="--height 5048"
 CHANNELS="--channels 3"
-NIMAGES="--nImages 100"
+NIMAGES="--nImages 10"
 ITERATIONS="--iterations 10"
 
 make
