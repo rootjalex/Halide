@@ -44,10 +44,10 @@ public:
             stride.set_estimate(2);
             extent.set_estimate(2);
 
-            output.dim(0).set_estimate(0, 512); // w2 = (w1 - extent) / stride + 1
-            output.dim(1).set_estimate(0, 512); // h2 = (h1 - extent) / stride + 1
+            output.dim(0).set_estimate(0, 1048); // w2 = (w1 - extent) / stride + 1
+            output.dim(1).set_estimate(0, 1048); // h2 = (h1 - extent) / stride + 1
             output.dim(2).set_estimate(0, 3);
-            output.dim(3).set_estimate(0, 100);
+            output.dim(3).set_estimate(0, 10);
         }
         else {
             output.parallel(n).vectorize(x, 16); // simple but effective
