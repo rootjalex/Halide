@@ -379,8 +379,9 @@ typedef enum halide_type_code_t
 {
     halide_type_int = 0,   //!< signed integers
     halide_type_uint = 1,  //!< unsigned integers
-    halide_type_float = 2, //!< floating point numbers
-    halide_type_handle = 3 //!< opaque pointer type (void *)
+    halide_type_float = 2, //!< IEEE floating point numbers
+    halide_type_handle = 3, //!< opaque pointer type (void *)
+    halide_type_bfloat = 4, //!< floating point numbers in the bfloat format
 } halide_type_code_t;
 
 // Note that while __attribute__ can go before or after the declaration,
@@ -1268,8 +1269,8 @@ typedef enum halide_target_feature_t {
     halide_target_feature_check_unsafe_promises, ///< Insert assertions for promises.
     halide_target_feature_hexagon_dma, ///< Enable Hexagon DMA buffers.
     halide_target_feature_embed_bitcode,  ///< Emulate clang -fembed-bitcode flag.
-    halide_target_feature_disable_llvm_loop_vectorize,  ///< Disable loop vectorization in LLVM. (Ignored for non-LLVM targets.)
-    halide_target_feature_disable_llvm_loop_unroll,  ///< Disable loop unrolling in LLVM. (Ignored for non-LLVM targets.)
+    halide_target_feature_enable_llvm_loop_opt,  ///< Enable loop vectorization + unrolling in LLVM. Overrides halide_target_feature_disable_llvm_loop_opt. (Ignored for non-LLVM targets.)
+    halide_target_feature_disable_llvm_loop_opt,  ///< Disable loop vectorization + unrolling in LLVM. (Ignored for non-LLVM targets.)
     halide_target_feature_wasm_simd128,  ///< Enable +simd128 instructions for WebAssembly codegen.
     halide_target_feature_wasm_signext,  ///< Enable +sign-ext instructions for WebAssembly codegen.
     halide_target_feature_sve, ///< Enable ARM Scalable Vector Extensions
