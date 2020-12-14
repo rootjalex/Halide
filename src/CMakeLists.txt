@@ -86,6 +86,7 @@ set(HEADER_FILES
     InlineReductions.h
     IntegerDivisionTable.h
     Interval.h
+    IntervalMatch.h
     Introspection.h
     IntrusivePtr.h
     IR.h

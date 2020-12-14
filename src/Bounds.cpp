@@ -8,6 +8,7 @@
 #include "Deinterleave.h"
 #include "ExprUsesVar.h"
 #include "Func.h"
+#include "IntervalMatch.h"
 #include "IR.h"
 #include "IREquality.h"
 #include "IRMutator.h"
@@ -98,6 +99,11 @@ std::ostream &operator<<(std::ostream &stream, const Box &b) {
     return stream;
 }
 
+IRMatcher::WildInterval<0> x;
+IRMatcher::WildInterval<1> y;
+IRMatcher::WildConst<0> c0;
+IRMatcher::WildConst<1> c1;
+
 class Bounds : public IRVisitor {
 public:
     Interval interval;
@@ -107,6 +113,10 @@ public:
     // and lower bounds. If the bound is not constant, it is set to
     // unbounded.
     bool const_bound;
+
+    // Used for the bounds rewriter to produce an interval.
+    // TODO: Implement some sort of caching/saving technique to remove redundancy.
+    const std::function<Interval(Expr)> interval_lambda = [&](const Expr &expr) -> Interval { expr.accept(this); return this->interval; };
 
     Bounds(const Scope<Interval> *s, const FuncValueBounds &fb, bool const_bound)
         : func_bounds(fb), const_bound(const_bound) {
@@ -418,6 +428,16 @@ private:
     }
 
     void visit(const Sub *op) override {
+        {
+            auto rewrite = IRMatcher::bounds_rewriter(IRMatcher::sub(op->a, op->b), op->type, interval_lambda);
+
+            if (rewrite(c0 - c1, fold(c0 - c1)) ||
+                rewrite(x - x, 0)) {
+                interval = Interval::single_point(rewrite.result);
+                return;
+            }
+            // TODO: add the rest
+        }
         TRACK_BOUNDS_INTERVAL;
         op->a.accept(this);
         Interval a = interval;
@@ -3065,6 +3085,13 @@ void boxes_touched_test() {
 
 void bounds_test() {
     using namespace Halide::ConciseCasts;
+
+    {
+        Scope<Interval> scope;
+        Var x("x"), y("y");
+        scope.push("x", Interval(Expr(0), Expr(10)));
+        check(scope, x - x, 0, 0);
+    }
 
     constant_bound_test();
 
