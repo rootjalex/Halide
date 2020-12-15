@@ -10,6 +10,7 @@
 #include <set>
 #include <vector>
 
+#include "Interval.h"
 #include "IR.h"
 #include "IREquality.h"
 #include "IROperator.h"
@@ -77,6 +78,8 @@ static const halide_type_t i64_type = {halide_type_int, 64, 1};
  */
 struct MatcherState {
     const BaseExprNode *bindings[max_wild];
+    // TODO: how bad is this for stack space?
+    Interval intervals[max_wild];
     halide_scalar_value_t bound_const[max_wild];
 
     // values of the lanes field with special meaning.
@@ -123,6 +126,16 @@ struct MatcherState {
     void get_bound_const(int i, halide_scalar_value_t &val, halide_type_t &type) const noexcept {
         val = bound_const[i];
         type = bound_const_type[i];
+    }
+
+    HALIDE_ALWAYS_INLINE
+    void set_interval(int i, Interval &interval) noexcept {
+        intervals[i] = interval;
+    }
+
+    HALIDE_ALWAYS_INLINE
+    const Interval &get_interval(int i) const noexcept {
+        return intervals[i];
     }
 
     HALIDE_ALWAYS_INLINE
@@ -219,7 +232,8 @@ struct SpecificExpr {
         return expr;
     }
 
-    template<typename LambdaType>
+    // TODO: fix this
+    template<uint32_t bound, typename LambdaType>
     HALIDE_ALWAYS_INLINE
     bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
         return true;
@@ -285,7 +299,7 @@ struct WildConstInt {
         return make_const_expr(val, type);
     }
 
-    template<typename LambdaType>
+    template<uint32_t bound, typename LambdaType>
     HALIDE_ALWAYS_INLINE
     bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
         return true;
@@ -344,7 +358,7 @@ struct WildConstUInt {
         return make_const_expr(val, type);
     }
 
-    template<typename LambdaType>
+    template<uint32_t bound, typename LambdaType>
     HALIDE_ALWAYS_INLINE
     bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
         return true;
@@ -403,7 +417,7 @@ struct WildConstFloat {
         return make_const_expr(val, type);
     }
 
-    template<typename LambdaType>
+    template<uint32_t bound, typename LambdaType>
     HALIDE_ALWAYS_INLINE
     bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
         return true;
@@ -467,7 +481,7 @@ struct WildConst {
         return make_const_expr(val, type);
     }
 
-    template<typename LambdaType>
+    template<uint32_t bound, typename LambdaType>
     HALIDE_ALWAYS_INLINE
     bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
         return true;
@@ -513,12 +527,7 @@ struct Wild {
         return state.get_binding(i);
     }
 
-    template<typename LambdaType>
-    HALIDE_ALWAYS_INLINE
-    bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
-        // TODO: not sure this is even necessary.
-        return true;
-    }
+    // Wild's should not ever have defined() called on them, they cannot be used with WildIntervals.
 
     constexpr static bool foldable = true;
     HALIDE_ALWAYS_INLINE
@@ -602,7 +611,7 @@ struct IntLiteral {
         return make_const(type_hint, v);
     }
 
-    template<typename LambdaType>
+    template<uint32_t bound, typename LambdaType>
     HALIDE_ALWAYS_INLINE
     bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
         return true;
@@ -793,10 +802,11 @@ struct BinOp {
         return Op::make(std::move(ea), std::move(eb));
     }
 
-    template<typename LambdaType>
+    template<uint32_t bound, typename LambdaType>
     HALIDE_ALWAYS_INLINE
     bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
-        return a.defined(state, type_hint, lambda) && b.defined(state, type_hint, lambda);
+        return a.template defined<bound>(state, type_hint, lambda) &&
+               b.template defined<bound | bindings<A>::mask>(state, type_hint, lambda);
     }
 };
 
@@ -901,10 +911,11 @@ struct CmpOp {
         return Op::make(std::move(ea), std::move(eb));
     }
 
-    template<typename LambdaType>
+    template<uint32_t bound, typename LambdaType>
     HALIDE_ALWAYS_INLINE
     bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
-        return a.defined(state, type_hint, lambda) && b.defined(state, type_hint, lambda);
+        return a.template defined<bound>(state, type_hint, lambda) &&
+               b.template defined<bound | bindings<A>::mask>(state, type_hint, lambda);
     }
 };
 
@@ -1460,25 +1471,26 @@ struct Intrin {
         return Expr();
     }
 
-    template<int i, typename LambdaType,
-             typename = typename std::enable_if<(i < sizeof...(Args))>::type>
-    HALIDE_ALWAYS_INLINE bool args_defined(int, LambdaType lambda) {
-        // TODO: c++17's `if constexpr` would be really nice here.
-        return (std::get<i>(args).template defined(lambda)) &&
-                args_defined<i + 1, LambdaType>(0, lambda);
-    }
+    // TODO: fix these
+    // template<int i, typename LambdaType,
+    //          typename = typename std::enable_if<(i < sizeof...(Args))>::type>
+    // HALIDE_ALWAYS_INLINE bool args_defined(int, LambdaType lambda) {
+    //     // TODO: c++17's `if constexpr` would be really nice here.
+    //     return (std::get<i>(args).template defined(lambda)) &&
+    //             args_defined<i + 1, LambdaType>(0, lambda);
+    // }
 
-    template<int i, typename LambdaType,
-             typename = typename std::enable_if<!(i < sizeof...(Args))>::type>
-    HALIDE_ALWAYS_INLINE bool args_defined(double, LambdaType lambda) {
-        return true;
-    }
+    // template<int i, typename LambdaType,
+    //          typename = typename std::enable_if<!(i < sizeof...(Args))>::type>
+    // HALIDE_ALWAYS_INLINE bool args_defined(double, LambdaType lambda) {
+    //     return true;
+    // }
 
-    template<typename LambdaType>
-    HALIDE_ALWAYS_INLINE
-    bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
-        return args_defined<0, LambdaType>(0, lambda);
-    }
+    // template<uint32_t bound, typename LambdaType>
+    // HALIDE_ALWAYS_INLINE
+    // bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
+    //     return args_defined<0, LambdaType>(0, lambda);
+    // }
 
     constexpr static bool foldable = false;
 
@@ -1532,11 +1544,12 @@ struct NotOp {
     }
 
 
-    template<typename LambdaType>
-    HALIDE_ALWAYS_INLINE
-    bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
-        return a.defined(state, type_hint, lambda);
-    }
+    // TODO: fix this
+    // template<uint32_t bound, typename LambdaType>
+    // HALIDE_ALWAYS_INLINE
+    // bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
+    //     return a.template defined(state, type_hint, lambda);
+    // }
 
     constexpr static bool foldable = A::foldable;
 
@@ -1601,11 +1614,12 @@ struct SelectOp {
     }
 
 
-    template<typename LambdaType>
-    HALIDE_ALWAYS_INLINE
-    bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
-        return c.defined(state, type_hint, lambda) && t.defined(state, type_hint, lambda) && f.defined(state, type_hint, lambda);
-    }
+    // TODO: fix this
+    // template<uint32_t bound, typename LambdaType>
+    // HALIDE_ALWAYS_INLINE
+    // bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
+    //     return c.template defined(state, type_hint, lambda) && t.template defined(state, type_hint, lambda) && f.template defined(state, type_hint, lambda);
+    // }
 
     constexpr static bool foldable = C::foldable && T::foldable && F::foldable;
 
@@ -1680,12 +1694,13 @@ struct BroadcastOp {
         }
     }
 
-    template<typename LambdaType>
-    HALIDE_ALWAYS_INLINE
-    bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
-        // Lanes are fixed (integer).
-        return a.defined(state, type_hint, lambda);
-    }
+    // TODO: fix this
+    // template<uint32_t bound, typename LambdaType>
+    // HALIDE_ALWAYS_INLINE
+    // bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
+    //     // Lanes are fixed (integer).
+    //     return a.template defined(state, type_hint, lambda);
+    // }
 
     constexpr static bool foldable = false;
 
@@ -1760,12 +1775,13 @@ struct RampOp {
         return Ramp::make(ea, eb, l);
     }
 
-    template<typename LambdaType>
-    HALIDE_ALWAYS_INLINE
-    bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
-        // Lanes are fixed (integer).
-        return a.defined(state, type_hint, lambda) && b.defined(state, type_hint, lambda);
-    }
+    // TODO: fix this
+    // template<uint32_t bound, typename LambdaType>
+    // HALIDE_ALWAYS_INLINE
+    // bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
+    //     // Lanes are fixed (integer).
+    //     return a.template defined(state, type_hint, lambda) && b.template defined(state, type_hint, lambda);
+    // }
 
     constexpr static bool foldable = false;
 };
@@ -1822,12 +1838,13 @@ struct VectorReduceOp {
         return VectorReduce::make(reduce_op, a.make(state, type_hint), l);
     }
 
-    template<typename LambdaType>
-    HALIDE_ALWAYS_INLINE
-    bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
-        // Lanes are fixed (integer).
-        return a.defined(state, type_hint, lambda);
-    }
+    // TODO: fix this
+    // template<uint32_t bound, typename LambdaType>
+    // HALIDE_ALWAYS_INLINE
+    // bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
+    //     // Lanes are fixed (integer).
+    //     return a.template defined(state, type_hint, lambda);
+    // }
 
     constexpr static bool foldable = false;
 };
@@ -1897,11 +1914,12 @@ struct NegateOp {
         return Sub::make(std::move(z), std::move(ea));
     }
 
-    template<typename LambdaType>
-    HALIDE_ALWAYS_INLINE
-    bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
-        return a.defined(state, type_hint, lambda);
-    }
+    // TODO: fix this
+    // template<uint32_t bound, typename LambdaType>
+    // HALIDE_ALWAYS_INLINE
+    // bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
+    //     return a.template defined(state, type_hint, lambda);
+    // }
 
     constexpr static bool foldable = A::foldable;
 
@@ -1980,11 +1998,12 @@ struct CastOp {
         return cast(t, a.make(state, {}));
     }
 
-    template<typename LambdaType>
-    HALIDE_ALWAYS_INLINE
-    bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
-        return a.defined(state, type_hint, lambda);
-    }
+    // TODO: fix this
+    // template<uint32_t bound, typename LambdaType>
+    // HALIDE_ALWAYS_INLINE
+    // bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
+    //     return a.template defined(state, type_hint, lambda);
+    // }
 
     constexpr static bool foldable = false;
 };
@@ -2035,10 +2054,11 @@ struct Fold {
         return e;
     }
 
-    template<typename LambdaType>
+    // TODO: fix this
+    template<uint32_t bound, typename LambdaType>
     HALIDE_ALWAYS_INLINE
     bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
-        return a.defined(state, type_hint, lambda);
+        return a.template defined<bound>(state, type_hint, lambda);
     }
 
     constexpr static bool foldable = A::foldable;
@@ -2121,13 +2141,14 @@ struct Overflow {
         return make_const_special_expr(type_hint);
     }
 
-    template<typename LambdaType>
-    HALIDE_ALWAYS_INLINE
-    bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
-        // TODO: what should this actually do?
-        // Not sure we should return true here.
-        return true;
-    }
+    // TODO: fix this
+    // template<uint32_t bound, typename LambdaType>
+    // HALIDE_ALWAYS_INLINE
+    // bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
+    //     // TODO: what should this actually do?
+    //     // Not sure we should return true here.
+    //     return true;
+    // }
 
     constexpr static bool foldable = true;
 

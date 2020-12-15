@@ -99,11 +99,6 @@ std::ostream &operator<<(std::ostream &stream, const Box &b) {
     return stream;
 }
 
-IRMatcher::WildInterval<0> x;
-IRMatcher::WildInterval<1> y;
-IRMatcher::WildConst<0> c0;
-IRMatcher::WildConst<1> c1;
-
 class Bounds : public IRVisitor {
 public:
     Interval interval;
@@ -116,7 +111,21 @@ public:
 
     // Used for the bounds rewriter to produce an interval.
     // TODO: Implement some sort of caching/saving technique to remove redundancy.
-    const std::function<Interval(Expr)> interval_lambda = [&](const Expr &expr) -> Interval { expr.accept(this); return this->interval; };
+    std::map<Expr, Interval, ExprCompare> expr_cache;
+    const std::function<Interval(Expr)> interval_lambda = [&](const Expr &expr) -> Interval {
+        auto iter = expr_cache.emplace(expr, Interval());
+        if (iter.second) {
+            // Expr not seen before.
+            expr.accept(this);
+            iter.first->second = this->interval;
+        }
+        return iter.first->second;
+    };
+
+    IRMatcher::WildInterval<0> x;
+    IRMatcher::WildInterval<1> y;
+    IRMatcher::WildConst<0> c0;
+    IRMatcher::WildConst<1> c1;
 
     Bounds(const Scope<Interval> *s, const FuncValueBounds &fb, bool const_bound)
         : func_bounds(fb), const_bound(const_bound) {
@@ -389,6 +398,23 @@ private:
 
     void visit(const Add *op) override {
         TRACK_BOUNDS_INTERVAL;
+        {
+            auto rewrite = IRMatcher::bounds_rewriter(IRMatcher::add(op->a, op->b), op->type, interval_lambda);
+
+            // TODO: make these more cohesive.
+            if (rewrite(c0 + c1, fold(c0 + c1)) ||
+                rewrite(x + x, x.min * 2, IRMatcher::is_single_point(x, op->a) || IRMatcher::is_single_point(x)) ||
+                rewrite(x + y, op, IRMatcher::is_single_point(x, op->a) && IRMatcher::is_single_point(y, op->b)) ||
+                rewrite(x + y, x.min + y.min, IRMatcher::is_single_point(x) && IRMatcher::is_single_point(y))) {
+
+                interval = Interval::single_point(rewrite.result);
+                return;
+            }
+
+            // TODO: add the rest
+        }
+
+
         op->a.accept(this);
         Interval a = interval;
         op->b.accept(this);
@@ -3086,13 +3112,6 @@ void boxes_touched_test() {
 void bounds_test() {
     using namespace Halide::ConciseCasts;
 
-    {
-        Scope<Interval> scope;
-        Var x("x"), y("y");
-        scope.push("x", Interval(Expr(0), Expr(10)));
-        check(scope, x - x, 0, 0);
-    }
-
     constant_bound_test();
 
     Scope<Interval> scope;
@@ -3217,6 +3236,27 @@ void bounds_test() {
         ScopedBinding<Interval> yb(scope, "y", Interval(Interval::neg_inf(), -1));
         // Cannot change sign, only can decrease magnitude.
         check(scope, x << y, 0, Interval::pos_inf());
+    }
+
+    // Tests for rewrite rules
+    {
+        ScopedBinding<Interval> xb(scope, "x", Interval(24, Interval::pos_inf()));
+        // Cannot change sign, only can decrease magnitude.
+        check(scope, x - x, 0, 0);
+    }
+    // check that single point adds work.
+    {
+        Var w("w");
+        check(scope, w + w, w * 2, w * 2);
+    }
+    {
+        check(scope, Expr(7) + Expr(8), 15, 15);
+    }
+    {
+        Expr e = 1;
+        Expr b = 2;
+        ScopedBinding<Interval> yb(scope, "y", Interval(b, b));
+        check(scope, y + e, 3, 3);
     }
 
     // If we clamp something unbounded as one type, the bounds should
