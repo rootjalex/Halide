@@ -99,6 +99,20 @@ std::ostream &operator<<(std::ostream &stream, const Box &b) {
     return stream;
 }
 
+// Returns true iff t does have a well defined overflow behavior.
+HALIDE_ALWAYS_INLINE
+bool can_overflow(Type t) {
+    return (!t.is_float() && (!t.is_int() || t.bits() <= 16));
+}
+
+std::ostream &operator<<(std::ostream &stream, const Interval &interval) {
+    stream << "[" << interval.min << ", " << interval.max << "]";
+    return stream;
+}
+
+// used in rewrite casts.
+static const halide_type_t i32_type = {halide_type_int, 32, 1};
+
 class Bounds : public IRVisitor {
 public:
     Interval interval;
@@ -401,7 +415,6 @@ private:
         {
             auto rewrite = IRMatcher::bounds_rewriter(IRMatcher::add(op->a, op->b), op->type, interval_lambda);
 
-            // TODO: make these more cohesive.
             if (rewrite(c0 + c1, fold(c0 + c1)) ||
                 rewrite(x + x, x.min * 2, IRMatcher::is_single_point(x, op->a) || IRMatcher::is_single_point(x)) ||
                 rewrite(x + y, op, IRMatcher::is_single_point(x, op->a) && IRMatcher::is_single_point(y, op->b)) ||
@@ -409,45 +422,28 @@ private:
 
                 interval = Interval::single_point(rewrite.result);
                 return;
-            }
-
-            // TODO: add the rest
-        }
-
-
-        op->a.accept(this);
-        Interval a = interval;
-        op->b.accept(this);
-        Interval b = interval;
-
-        if (a.is_single_point(op->a) && b.is_single_point(op->b)) {
-            interval = Interval::single_point(op);
-        } else if (a.is_single_point() && b.is_single_point()) {
-            interval = Interval::single_point(a.min + b.min);
-        } else {
-            bounds_of_type(op->type);
-            if (a.has_lower_bound() && b.has_lower_bound()) {
-                interval.min = a.min + b.min;
-            }
-            if (a.has_upper_bound() && b.has_upper_bound()) {
-                interval.max = a.max + b.max;
-            }
-
-            // Assume no overflow for float, int32, and int64
-            if (!op->type.is_float() && (!op->type.is_int() || op->type.bits() < 32)) {
-                if (interval.has_upper_bound()) {
-                    Expr no_overflow = (cast<int>(a.max) + cast<int>(b.max) == cast<int>(interval.max));
-                    if (!can_prove(no_overflow)) {
-                        bounds_of_type(op->type);
-                        return;
-                    }
+            } else if (can_overflow(op->type) &&
+                (rewrite(x + y, 0, (cast(i32_type, x.max) + cast(i32_type, y.max) != cast(i32_type, x.max + y.max))) ||
+                rewrite(x + y, 0, (cast(i32_type, x.min) + cast(i32_type, y.min) != cast(i32_type, x.min + y.min))))) {
+                // Overflow occured.
+                // TODO: previously this was a !can_prove of an equality, it's now can_prove not equal,
+                //       but this needs to be fixed. This means we might need a rewrite rule with
+                //       an anti-predicate.
+                bounds_of_type(op->type);
+                return;
+            } else {
+                // Lower bound
+                if (rewrite(x + y, x.min + y.min)) {
+                    interval.min = rewrite.result;
+                } else {
+                    interval.min = Interval::neg_inf();
                 }
-                if (interval.has_lower_bound()) {
-                    Expr no_overflow = (cast<int>(a.min) + cast<int>(b.min) == cast<int>(interval.min));
-                    if (!can_prove(no_overflow)) {
-                        bounds_of_type(op->type);
-                        return;
-                    }
+
+                // Upper bound
+                if (rewrite(x + y, x.max + y.max)) {
+                    interval.max = rewrite.result;
+                } else {
+                    interval.max = Interval::pos_inf();
                 }
             }
         }

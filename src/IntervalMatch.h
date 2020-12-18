@@ -366,11 +366,6 @@ StrictPointCheck<i> is_single_point(WildInterval<i> interval, const Expr &e) {
     return StrictPointCheck<i>(&e);
 }
 
-// template<typename A, typename Prover>
-// HALIDE_ALWAYS_INLINE auto can_prove(A a, Prover *p) noexcept -> CanProve<decltype(pattern_arg(a)), Prover> {
-//     return {pattern_arg(a), p};
-// }
-
 }  // namespace IRMatcher
 }  // namespace Internal
 }  // namespace Halide
