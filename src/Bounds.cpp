@@ -8,7 +8,6 @@
 #include "Deinterleave.h"
 #include "ExprUsesVar.h"
 #include "Func.h"
-#include "IntervalMatch.h"
 #include "IR.h"
 #include "IREquality.h"
 #include "IRMutator.h"
@@ -16,6 +15,7 @@
 #include "IRPrinter.h"
 #include "IRVisitor.h"
 #include "InlineReductions.h"
+#include "IntervalMatch.h"
 #include "Param.h"
 #include "PurifyIndexMath.h"
 #include "Simplify.h"
@@ -412,97 +412,82 @@ private:
 
     void visit(const Add *op) override {
         TRACK_BOUNDS_INTERVAL;
-        {
-            auto rewrite = IRMatcher::bounds_rewriter(IRMatcher::add(op->a, op->b), op->type, interval_lambda);
+        auto rewrite = IRMatcher::bounds_rewriter(IRMatcher::add(op->a, op->b), op->type, interval_lambda);
 
-            if (rewrite(c0 + c1, fold(c0 + c1)) ||
-                rewrite(x + x, x.min * 2, IRMatcher::is_single_point(x, op->a) || IRMatcher::is_single_point(x)) ||
-                rewrite(x + y, op, IRMatcher::is_single_point(x, op->a) && IRMatcher::is_single_point(y, op->b)) ||
-                rewrite(x + y, x.min + y.min, IRMatcher::is_single_point(x) && IRMatcher::is_single_point(y))) {
+        if (rewrite(c0 + c1, fold(c0 + c1)) ||
+            rewrite(x + x, x.min * 2, IRMatcher::is_single_point(x, op->a) || IRMatcher::is_single_point(x)) ||
+            rewrite(x + y, op, IRMatcher::is_single_point(x, op->a) && IRMatcher::is_single_point(y, op->b)) ||
+            rewrite(x + y, x.min + y.min, IRMatcher::is_single_point(x) && IRMatcher::is_single_point(y))) {
 
-                interval = Interval::single_point(rewrite.result);
-                return;
-            } else if (can_overflow(op->type) &&
-                (rewrite(x + y, 0, (cast(i32_type, x.max) + cast(i32_type, y.max) != cast(i32_type, x.max + y.max))) ||
-                rewrite(x + y, 0, (cast(i32_type, x.min) + cast(i32_type, y.min) != cast(i32_type, x.min + y.min))))) {
-                // Overflow occured.
-                // TODO: previously this was a !can_prove of an equality, it's now can_prove not equal,
-                //       but this needs to be fixed. This means we might need a rewrite rule with
-                //       an anti-predicate.
-                bounds_of_type(op->type);
-                return;
+            interval = Interval::single_point(rewrite.result);
+            return;
+        } else if (can_overflow(op->type) &&
+                   (rewrite(x + y, 0, IRMatcher::anti((cast(i32_type, x.max) + cast(i32_type, y.max) == cast(i32_type, x.max + y.max)))) ||
+                    rewrite(x + y, 0, IRMatcher::anti((cast(i32_type, x.min) + cast(i32_type, y.min) == cast(i32_type, x.min + y.min)))))) {
+            // Overflow occured.
+            // Anti is used to prove an anti-predicate.
+            bounds_of_type(op->type);
+            return;
+        } else {
+            // Filling in partial values is dangerous because rewrite() might overwrite
+            // interval in a call to bounds inference.
+            Interval temp;
+
+            // Lower bound
+            if (rewrite(x + y, x.min + y.min)) {
+                temp.min = rewrite.result;
             } else {
-                // Lower bound
-                if (rewrite(x + y, x.min + y.min)) {
-                    interval.min = rewrite.result;
-                } else {
-                    interval.min = Interval::neg_inf();
-                }
-
-                // Upper bound
-                if (rewrite(x + y, x.max + y.max)) {
-                    interval.max = rewrite.result;
-                } else {
-                    interval.max = Interval::pos_inf();
-                }
+                temp.min = Interval::neg_inf();
             }
+
+            // Upper bound
+            if (rewrite(x + y, x.max + y.max)) {
+                temp.max = rewrite.result;
+            } else {
+                temp.max = Interval::pos_inf();
+            }
+
+            // TODO: is there something like std::move to make this more efficient?
+            interval = temp;
         }
     }
 
     void visit(const Sub *op) override {
-        {
-            auto rewrite = IRMatcher::bounds_rewriter(IRMatcher::sub(op->a, op->b), op->type, interval_lambda);
-
-            if (rewrite(c0 - c1, fold(c0 - c1)) ||
-                rewrite(x - x, 0)) {
-                interval = Interval::single_point(rewrite.result);
-                return;
-            }
-            // TODO: add the rest
-        }
         TRACK_BOUNDS_INTERVAL;
-        op->a.accept(this);
-        Interval a = interval;
-        op->b.accept(this);
-        Interval b = interval;
+        auto rewrite = IRMatcher::bounds_rewriter(IRMatcher::sub(op->a, op->b), op->type, interval_lambda);
 
-        if (a.is_single_point(op->a) && b.is_single_point(op->b)) {
-            interval = Interval::single_point(op);
-        } else if (a.is_single_point() && b.is_single_point()) {
-            interval = Interval::single_point(a.min - b.min);
-        } else {
+        if (rewrite(c0 - c1, fold(c0 - c1)) ||
+            rewrite(x - x, 0) ||
+            rewrite(x - y, op, IRMatcher::is_single_point(x, op->a) && IRMatcher::is_single_point(y, op->b)) ||
+            rewrite(x - y, x.min - y.min, IRMatcher::is_single_point(x) && IRMatcher::is_single_point(y))) {
+
+            interval = Interval::single_point(rewrite.result);
+            return;
+        } else if (can_overflow(op->type) &&
+                   ((op->type.is_uint() && rewrite(x - y, 0, IRMatcher::anti(y.max <= x.min))) ||
+                    rewrite(x - y, 0, IRMatcher::anti((cast(i32_type, x.min) - cast(i32_type, y.max) == cast(i32_type, x.min - y.max)))) ||
+                    rewrite(x - y, 0, IRMatcher::anti((cast(i32_type, x.max) - cast(i32_type, y.min) == cast(i32_type, x.max - y.min)))))) {
+            // Overflow occured.
+            // Anti is used to prove an anti-predicate.
             bounds_of_type(op->type);
-            if (a.has_lower_bound() && b.has_upper_bound()) {
-                interval.min = a.min - b.max;
-            }
-            if (a.has_upper_bound() && b.has_lower_bound()) {
-                interval.max = a.max - b.min;
+            return;
+        } else {
+
+            // Filling in partial values is dangerous because rewrite() might overwrite
+            // interval in a call to bounds inference.
+            Interval temp;
+
+            // Lower bound is a.min - b.max
+            if (rewrite(x - y, x.min - y.max)) {
+                temp.min = rewrite.result;
             }
 
-            // Assume no overflow for float, int32, and int64
-            if (!op->type.is_float() && (!op->type.is_int() || op->type.bits() < 32)) {
-                if (interval.has_upper_bound()) {
-                    Expr no_overflow = (cast<int>(a.max) - cast<int>(b.min) == cast<int>(interval.max));
-                    if (!can_prove(no_overflow)) {
-                        bounds_of_type(op->type);
-                        return;
-                    }
-                }
-                if (interval.has_lower_bound()) {
-                    Expr no_overflow = (cast<int>(a.min) - cast<int>(b.max) == cast<int>(interval.min));
-                    if (!can_prove(no_overflow)) {
-                        bounds_of_type(op->type);
-                        return;
-                    }
-                }
+            // Upper bound is a.max - b.min;
+            if (rewrite(x - y, x.max - y.min)) {
+                temp.max = rewrite.result;
             }
-
-            // Check underflow for uint
-            if (op->type.is_uint() &&
-                interval.has_lower_bound() &&
-                !can_prove(b.max <= a.min)) {
-                bounds_of_type(op->type);
-            }
+            // TODO: is there something like std::move to make this more efficient?
+            interval = temp;
         }
     }
 
@@ -1508,8 +1493,11 @@ private:
         }
 
         {
+            // TODO: be smarter about this caching.
+            auto temp = std::move(expr_cache);
             ScopedBinding<Interval> p(scope, op->name, var);
             op->body.accept(this);
+            expr_cache = std::move(temp);
         }
 
         bool single_point = interval.is_single_point();

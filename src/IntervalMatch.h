@@ -1,10 +1,10 @@
 #ifndef HALIDE_INTERVAL_MATCH_H
 #define HALIDE_INTERVAL_MATCH_H
 
-#include "Interval.h"
 #include "IRMatch.h"
 #include "IROperator.h"
-#include "Simplify.h" // can_prove()
+#include "Interval.h"
+#include "Simplify.h"  // can_prove()
 
 namespace Halide {
 namespace Internal {
@@ -28,8 +28,7 @@ struct WildLowerBound {
     }
 
     template<uint32_t bound, typename LambdaType>
-    HALIDE_ALWAYS_INLINE
-    bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
+    HALIDE_ALWAYS_INLINE bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
         // TODO: should be if constexpr when Halide switches to c++17.
         if (bound & binds) {
             // fetch the stored Interval's value.
@@ -66,8 +65,7 @@ struct WildUpperBound {
     }
 
     template<uint32_t bound, typename LambdaType>
-    HALIDE_ALWAYS_INLINE
-    bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
+    HALIDE_ALWAYS_INLINE bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
         // TODO: should be if constexpr when Halide switches to c++17.
         if (bound & binds) {
             // fetch the stored Interval's value.
@@ -141,11 +139,10 @@ struct BoundsRewriter {
 
     // TODO: add fuzzing tests?
     template<typename Before,
-            typename After,
-            typename = typename enable_if_pattern<Before>::type,
-            typename = typename enable_if_pattern<After>::type>
-    HALIDE_ALWAYS_INLINE
-    bool operator()(Before before, After after) {
+             typename After,
+             typename = typename enable_if_pattern<Before>::type,
+             typename = typename enable_if_pattern<After>::type>
+    HALIDE_ALWAYS_INLINE bool operator()(Before before, After after) {
         static_assert((Before::binds & After::binds) == After::binds, "Rule result uses unbound values");
         static_assert(Before::canonical, "LHS of rewrite rule should be in canonical form");
         static_assert(After::canonical, "RHS of rewrite rule should be in canonical form");
@@ -207,10 +204,9 @@ struct BoundsRewriter {
 
         if (before.template match<0>(instance, state)) {
             if (pred.template defined<0>(state, output_type, lambda)) {
-                Expr pred_expr = pred.make(state, output_type);
-                // TODO: early-out for const predicates?
-                if (can_prove(pred_expr)) {
-                   if (after.template defined<0>(state, output_type, lambda)) {
+                if (evaluate_nonconst_predicate(pred, state, output_type)) {
+                    // TODO: early-out for const predicates?
+                    if (after.template defined<0>(state, output_type, lambda)) {
                         build_replacement(after);
                         return true;
                     }
@@ -230,9 +226,8 @@ struct BoundsRewriter {
         static_assert((Before::binds & Predicate::binds) == Predicate::binds, "Rule predicate uses unbound values");
         if (before.template match<0>(instance, state)) {
             if (pred.template defined<0>(state, output_type, lambda)) {
-                Expr pred_expr = pred.make(state, output_type);
-                // TODO: early-out for const predicates?
-                if (can_prove(pred_expr)) {
+                if (evaluate_nonconst_predicate(pred, state, output_type)) {
+                    // TODO: early-out for const predicates?
                     // after is already defined.
                     result = after;
                     return true;
@@ -252,10 +247,8 @@ struct BoundsRewriter {
         static_assert((Before::binds & Predicate::binds) == Predicate::binds, "Rule predicate uses unbound values");
         if (before.template match<0>(instance, state)) {
             if (pred.template defined<0>(state, output_type, lambda)) {
-                Expr pred_expr = pred.make(state, output_type);
-                // TODO: early-out for const predicates?
-                if (can_prove(pred_expr)) {
-                    // after is already defined.
+                if (evaluate_nonconst_predicate(pred, state, output_type)) {
+                    // TODO: early-out for const predicates?
                     // TODO: this doesn't work for uint64_t.
                     result = make_const(output_type, after);
                     return true;
@@ -271,8 +264,7 @@ struct BoundsRewriter {
 // TODO: rewriters for specific Exprs, possibly?
 template<typename Instance, typename LambdaType,
          typename = typename enable_if_pattern<Instance>::type>
-HALIDE_ALWAYS_INLINE
-auto bounds_rewriter(Instance instance, halide_type_t output_type, LambdaType lambda) noexcept -> BoundsRewriter<decltype(pattern_arg(instance)), LambdaType> {
+HALIDE_ALWAYS_INLINE auto bounds_rewriter(Instance instance, halide_type_t output_type, LambdaType lambda) noexcept -> BoundsRewriter<decltype(pattern_arg(instance)), LambdaType> {
     return {pattern_arg(instance), output_type, lambda};
 }
 
@@ -297,8 +289,7 @@ struct PointCheck {
     }
 
     template<uint32_t bound, typename LambdaType>
-    HALIDE_ALWAYS_INLINE
-    bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
+    HALIDE_ALWAYS_INLINE bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
         if ((bound & binds) == 0) {
             static Wild<i> base_wild;
             Expr base = base_wild.make(state, type_hint);
@@ -339,8 +330,7 @@ struct StrictPointCheck {
     }
 
     template<uint32_t bound, typename LambdaType>
-    HALIDE_ALWAYS_INLINE
-    bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
+    HALIDE_ALWAYS_INLINE bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
         if ((bound & binds) == 0) {
             static Wild<i> base_wild;
             Expr base = base_wild.make(state, type_hint);
@@ -356,18 +346,57 @@ struct StrictPointCheck {
 
 template<int i>
 HALIDE_ALWAYS_INLINE
-PointCheck<i> is_single_point(WildInterval<i> interval) {
+    PointCheck<i>
+    is_single_point(WildInterval<i> interval) {
     return PointCheck<i>();
 }
 
 template<int i>
 HALIDE_ALWAYS_INLINE
-StrictPointCheck<i> is_single_point(WildInterval<i> interval, const Expr &e) {
+    StrictPointCheck<i>
+    is_single_point(WildInterval<i> interval, const Expr &e) {
     return StrictPointCheck<i>(&e);
+}
+
+// wrapper used as an anti-Predicate rule.
+template<typename C>
+struct Anti {
+    struct pattern_tag {};
+
+    C cond;
+
+    constexpr static uint32_t binds = bindings<C>::mask;
+
+    Anti(C _cond)
+        : cond(_cond) {
+    }
+
+    template<uint32_t bound, typename LambdaType>
+    HALIDE_ALWAYS_INLINE bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
+        // defer to conditional.
+        return cond.template defined<bound>(state, type_hint, lambda);
+    }
+};
+
+template<typename Predicate>
+HALIDE_ALWAYS_INLINE bool evaluate_nonconst_predicate(Anti<Predicate> &p, MatcherState &state, halide_type_t output_type) {
+    Expr pred_expr = p.cond.make(state, output_type);
+    return !can_prove(pred_expr);
+}
+
+template<typename Predicate>
+HALIDE_ALWAYS_INLINE bool evaluate_nonconst_predicate(Predicate &p, MatcherState &state, halide_type_t output_type) {
+    Expr pred_expr = p.make(state, output_type);
+    return can_prove(pred_expr);
+}
+
+template<typename C>
+HALIDE_ALWAYS_INLINE Anti<C> anti(C cond) noexcept {
+    return Anti<C>(cond);
 }
 
 }  // namespace IRMatcher
 }  // namespace Internal
 }  // namespace Halide
 
-#endif // HALIDE_INTERVAL_MATCH_H
+#endif  // HALIDE_INTERVAL_MATCH_H

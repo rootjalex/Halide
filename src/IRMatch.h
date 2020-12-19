@@ -10,10 +10,10 @@
 #include <set>
 #include <vector>
 
-#include "Interval.h"
 #include "IR.h"
 #include "IREquality.h"
 #include "IROperator.h"
+#include "Interval.h"
 
 namespace Halide {
 namespace Internal {
@@ -234,8 +234,7 @@ struct SpecificExpr {
 
     // TODO: fix this
     template<uint32_t bound, typename LambdaType>
-    HALIDE_ALWAYS_INLINE
-    bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
+    HALIDE_ALWAYS_INLINE bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
         return true;
     }
 
@@ -300,8 +299,7 @@ struct WildConstInt {
     }
 
     template<uint32_t bound, typename LambdaType>
-    HALIDE_ALWAYS_INLINE
-    bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
+    HALIDE_ALWAYS_INLINE bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
         return true;
     }
 
@@ -359,8 +357,7 @@ struct WildConstUInt {
     }
 
     template<uint32_t bound, typename LambdaType>
-    HALIDE_ALWAYS_INLINE
-    bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
+    HALIDE_ALWAYS_INLINE bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
         return true;
     }
 
@@ -418,8 +415,7 @@ struct WildConstFloat {
     }
 
     template<uint32_t bound, typename LambdaType>
-    HALIDE_ALWAYS_INLINE
-    bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
+    HALIDE_ALWAYS_INLINE bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
         return true;
     }
 
@@ -482,8 +478,7 @@ struct WildConst {
     }
 
     template<uint32_t bound, typename LambdaType>
-    HALIDE_ALWAYS_INLINE
-    bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
+    HALIDE_ALWAYS_INLINE bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
         return true;
     }
 
@@ -612,8 +607,7 @@ struct IntLiteral {
     }
 
     template<uint32_t bound, typename LambdaType>
-    HALIDE_ALWAYS_INLINE
-    bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
+    HALIDE_ALWAYS_INLINE bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
         return true;
     }
 
@@ -803,8 +797,7 @@ struct BinOp {
     }
 
     template<uint32_t bound, typename LambdaType>
-    HALIDE_ALWAYS_INLINE
-    bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
+    HALIDE_ALWAYS_INLINE bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
         return a.template defined<bound>(state, type_hint, lambda) &&
                b.template defined<bound | bindings<A>::mask>(state, type_hint, lambda);
     }
@@ -912,8 +905,7 @@ struct CmpOp {
     }
 
     template<uint32_t bound, typename LambdaType>
-    HALIDE_ALWAYS_INLINE
-    bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
+    HALIDE_ALWAYS_INLINE bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
         return a.template defined<bound>(state, type_hint, lambda) &&
                b.template defined<bound | bindings<A>::mask>(state, type_hint, lambda);
     }
@@ -1543,7 +1535,6 @@ struct NotOp {
         return Not::make(a.make(state, type_hint));
     }
 
-
     // TODO: fix this
     // template<uint32_t bound, typename LambdaType>
     // HALIDE_ALWAYS_INLINE
@@ -1612,7 +1603,6 @@ struct SelectOp {
     Expr make(MatcherState &state, halide_type_t type_hint) const {
         return Select::make(c.make(state, {}), t.make(state, type_hint), f.make(state, type_hint));
     }
-
 
     // TODO: fix this
     // template<uint32_t bound, typename LambdaType>
@@ -1999,8 +1989,7 @@ struct CastOp {
     }
 
     template<uint32_t bound, typename LambdaType>
-    HALIDE_ALWAYS_INLINE
-    bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
+    HALIDE_ALWAYS_INLINE bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
         return a.template defined<bound>(state, type_hint, lambda);
     }
 
@@ -2055,8 +2044,7 @@ struct Fold {
 
     // TODO: fix this
     template<uint32_t bound, typename LambdaType>
-    HALIDE_ALWAYS_INLINE
-    bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
+    HALIDE_ALWAYS_INLINE bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
         return a.template defined<bound>(state, type_hint, lambda);
     }
 
