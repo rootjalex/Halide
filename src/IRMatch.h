@@ -1535,12 +1535,11 @@ struct NotOp {
         return Not::make(a.make(state, type_hint));
     }
 
-    // TODO: fix this
-    // template<uint32_t bound, typename LambdaType>
-    // HALIDE_ALWAYS_INLINE
-    // bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
-    //     return a.template defined(state, type_hint, lambda);
-    // }
+    template<uint32_t bound, typename LambdaType>
+    HALIDE_ALWAYS_INLINE
+    bool defined(MatcherState &state, halide_type_t type_hint, LambdaType lambda) {
+        return a.template defined<bound>(state, type_hint, lambda);
+    }
 
     constexpr static bool foldable = A::foldable;
 

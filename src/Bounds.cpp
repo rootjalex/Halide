@@ -493,46 +493,69 @@ private:
 
     void visit(const Mul *op) override {
         TRACK_BOUNDS_INTERVAL;
-        op->a.accept(this);
-        Interval a = interval;
 
-        op->b.accept(this);
-        Interval b = interval;
+        auto rewrite = IRMatcher::bounds_rewriter(IRMatcher::mul(op->a, op->b), op->type, interval_lambda);
 
-        // Move constants to the right
-        if (a.is_single_point() && !b.is_single_point()) {
-            std::swap(a, b);
-        }
+        // TODO: original swapped to move single_points to the right, how do we do that with rewrite rules?
 
-        if (a.is_single_point(op->a) && b.is_single_point(op->b)) {
-            interval = Interval::single_point(op);
+        if (rewrite(c0 * c1, fold(c0 * c1)) ||
+            rewrite(x * 0, 0) ||
+            rewrite(0 * y, 0) ||
+            rewrite(x * y, op, is_single_point(x, op->a) && is_single_point(y, op->b)) ||
+            rewrite(x * y, x.min * y.min, is_single_point(x) && is_single_point(y))) {
+
+            interval = Interval::single_point(rewrite.result);
             return;
-        } else if (a.is_single_point() && b.is_single_point()) {
-            interval = Interval::single_point(a.min * b.min);
-            return;
-        } else if (b.is_single_point()) {
-            Expr e1 = a.has_lower_bound() ? a.min * b.min : a.min;
-            Expr e2 = a.has_upper_bound() ? a.max * b.min : a.max;
-            if (is_const_zero(b.min)) {
-                interval = b;
-            } else if (is_positive_const(b.min) || op->type.is_uint()) {
-                interval = Interval(e1, e2);
-            } else if (is_negative_const(b.min)) {
-                if (e1.same_as(Interval::neg_inf())) {
-                    e1 = Interval::pos_inf();
-                }
-                if (e2.same_as(Interval::pos_inf())) {
-                    e2 = Interval::neg_inf();
-                }
-                interval = Interval(e2, e1);
-            } else if (a.is_bounded()) {
-                // Sign of b is unknown
-                Expr cmp = b.min >= make_zero(b.min.type().element_of());
-                interval = Interval(select(cmp, e1, e2), select(cmp, e2, e1));
-            } else {
+        } else if (can_overflow(op->type)) {
+            // Try to prove it can't overflow. (Be sure to use uint32 for unsigned
+            // types so that the case of 65535*65535 won't misleadingly fail.)
+            Type t = op->type.is_uint() ? UInt(32) : Int(32);
+            auto test1 = (cast(t, x.min) * cast(t, y.min) == cast(t, x.min * y.min));
+            auto test2 = (cast(t, x.min) * cast(t, y.max) == cast(t, x.min * y.max));
+            auto test3 = (cast(t, x.max) * cast(t, y.min) == cast(t, x.max * y.min));
+            auto test4 = (cast(t, x.max) * cast(t, y.max) == cast(t, x.max * y.max));
+            if (rewrite(x * y, 0, !is_bounded(x) || !is_bounded(y)) ||
+                rewrite(x * y, 0, anti(test1 && test2 && test3 && test4))) {
+
                 bounds_of_type(op->type);
+            } else {
+                // TODO: make this a rewrite rule
+                op->a.accept(this);
+                Interval a = interval;
+
+                op->b.accept(this);
+                Interval b = interval;
+
+                interval = Interval::nothing();
+                interval.include(a.min * b.min);
+                interval.include(a.min * b.max);
+                interval.include(a.max * b.min);
+                interval.include(a.max * b.max);
             }
-        } else if (a.is_bounded() && b.is_bounded()) {
+            return;
+        } else if (rewrite(x * y, x, is_single_point(x) && x.min == 0) ||
+                    rewrite(x * y, y, is_single_point(y) && y.min == 0) ||
+                    rewrite(x * c0, MakeInterval(c0 * x.min, c0 * x.max), is_pos_const(c0)) ||
+                    rewrite(c0 * y, MakeInterval(c0 * y.min, c0 * y.max), is_pos_const(c0)) ||
+                    rewrite(x * c0, MakeInterval(c0 * x.min, Interval::pos_inf()), is_pos_const(c0)) ||
+                    rewrite(c0 * y, MakeInterval(c0 * y.min, Interval::pos_inf()), is_pos_const(c0)) ||
+                    rewrite(x * c0, MakeInterval(Interval::neg_inf(), c0 * x.max), is_pos_const(c0)) ||
+                    rewrite(c0 * y, MakeInterval(Interval::neg_inf(), c0 * y.max), is_pos_const(c0)) ||
+                    rewrite(x * y, MakeInterval(x.min * y.min, x.min * y.max), is_single_point(x) && (is_pos_const(x.min) || op->type.is_uint())) ||
+                    rewrite(x * y, MakeInterval(x.min * y.min, Interval::pos_inf()), is_single_point(x) && (is_pos_const(x.min) || op->type.is_uint())) ||
+                    rewrite(x * y, MakeInterval(Interval::neg_inf(), x.min * y.max), is_single_point(x) && (is_pos_const(x.min) || op->type.is_uint()))
+                    ) {
+            // TODO: many of the above cases can be simplified and/or generalized.
+            // TODO: not all of the original rules have been added here, need to cross-check.
+            interval = rewrite.interval_result;
+        } else if (rewrite(x * y, 0, is_bounded(x) && is_bounded(y))) {
+            // TODO: how to make this a rewrite rule?
+            op->a.accept(this);
+            Interval a = interval;
+
+            op->b.accept(this);
+            Interval b = interval;
+
             interval = Interval::nothing();
             interval.include(a.min * b.min);
             interval.include(a.min * b.max);
@@ -540,24 +563,6 @@ private:
             interval.include(a.max * b.max);
         } else {
             bounds_of_type(op->type);
-        }
-
-        // Assume no overflow for float, int32, and int64
-        if (!op->type.is_float() && (!op->type.is_int() || op->type.bits() < 32)) {
-            if (a.is_bounded() && b.is_bounded()) {
-                // Try to prove it can't overflow. (Be sure to use uint32 for unsigned
-                // types so that the case of 65535*65535 won't misleadingly fail.)
-                Type t = op->type.is_uint() ? UInt(32) : Int(32);
-                Expr test1 = (cast(t, a.min) * cast(t, b.min) == cast(t, a.min * b.min));
-                Expr test2 = (cast(t, a.min) * cast(t, b.max) == cast(t, a.min * b.max));
-                Expr test3 = (cast(t, a.max) * cast(t, b.min) == cast(t, a.max * b.min));
-                Expr test4 = (cast(t, a.max) * cast(t, b.max) == cast(t, a.max * b.max));
-                if (!can_prove(test1 && test2 && test3 && test4)) {
-                    bounds_of_type(op->type);
-                }
-            } else {
-                bounds_of_type(op->type);
-            }
         }
     }
 
